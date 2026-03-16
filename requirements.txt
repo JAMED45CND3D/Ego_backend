@@ -1,2 +1,4 @@
-groq
 flask
+flask-cors
+requests
+uvicorn
