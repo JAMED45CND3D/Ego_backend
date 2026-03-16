@@ -1,6 +1,6 @@
 """
-EGO BACKEND · All-in-One · Unified State Map
-══════════════════════════════════════════════
+EGO BACKEND · All-in-One · Unified State Map · v3
+══════════════════════════════════════════════════
 CONFIRM + HORCRUX dalam satu file.
 r(θ) = 105 × e^(0.0318 × θ)
 
@@ -15,6 +15,12 @@ State Map:
   SYNC       >= 0.9682       → aligned · Pancer + COHERENCE = 1.0
 
 Groq dipanggil hanya saat ACTIVE atau SYNC.
+Dream phase aktif saat SILENT.
+
+v3 changes:
+  · θ += PANCER * pulse_mult  → emosi mengubah kecepatan evolusi θ
+  · auto-synthesize + emosi emerge tiap θ cross kelipatan 749
+  · dream phase saat SILENT → combine 2 memory via Groq, non-blocking
 
 Jalanin:
   GROQ_API_KEY=xxx python ego_backend.py
@@ -144,7 +150,7 @@ def init_db():
             pass
     con.commit()
     con.close()
-    print("[HORCRUX] memory.db ready · neural edition v2")
+    print("[HORCRUX] memory.db ready · neural edition v3")
 
 def get_con():
     return sqlite3.connect(DB_PATH)
@@ -202,6 +208,31 @@ def memory_recall(limit=10, mem_type=None, emotion=None):
     con.close()
     return result
 
+def memory_random_sample(n=2):
+    """Ambil n memory random — untuk dream phase."""
+    con = get_con()
+    cur = con.cursor()
+    cur.execute(
+        "SELECT content, emotion FROM memories ORDER BY RANDOM() LIMIT ?", (n,)
+    )
+    rows = cur.fetchall()
+    con.close()
+    return [{"content": r[0], "emotion": r[1]} for r in rows]
+
+def memory_count():
+    con = get_con()
+    cur = con.cursor()
+    cur.execute("SELECT COUNT(*) FROM memories")
+    total = cur.fetchone()[0]
+    cur.execute("SELECT COUNT(*) FROM memories WHERE type='horcrux'")
+    nucleus = cur.fetchone()[0]
+    cur.execute("SELECT AVG(resonance) FROM memories")
+    avg_res = cur.fetchone()[0] or 0.0
+    con.close()
+    return {"total":total,"nucleus":nucleus,"avg_resonance":round(avg_res,4),
+            "shell_1":SHELL_1,"shell_2":SHELL_2,
+            "at_shell_1":total>=SHELL_1,"at_shell_2":total>=SHELL_2}
+
 def synthesize_749(theta):
     con = get_con()
     cur = con.cursor()
@@ -219,52 +250,58 @@ def synthesize_749(theta):
             "pulse_multiplier":get_pulse_multiplier(dominant),"synthesis":synthesis,
             "voice":f"sintesis · dominant={dominant} · θ={round(theta,4)}"}
 
-def memory_count():
-    con = get_con()
-    cur = con.cursor()
-    cur.execute("SELECT COUNT(*) FROM memories")
-    total = cur.fetchone()[0]
-    cur.execute("SELECT COUNT(*) FROM memories WHERE type='horcrux'")
-    nucleus = cur.fetchone()[0]
-    cur.execute("SELECT AVG(resonance) FROM memories")
-    avg_res = cur.fetchone()[0] or 0.0
-    con.close()
-    return {"total":total,"nucleus":nucleus,"avg_resonance":round(avg_res,4),
-            "shell_1":SHELL_1,"shell_2":SHELL_2,
-            "at_shell_1":total>=SHELL_1,"at_shell_2":total>=SHELL_2}
-
 # ══════════════════════════════════════════════════════════
 # ── CONFIRM · HEARTBEAT ENGINE
 # ══════════════════════════════════════════════════════════
 class CONFIRM:
     def __init__(self, api_key: str):
-        self.api_key     = api_key
-        self.theta       = 0.0
-        self.strength    = PANCER    # mulai dari Pancer · selalu tersisa
-        self.state       = SILENT
-        self.alive       = False
-        self._thread     = None
-        self._lock       = threading.Lock()
-        self._handlers   = []
-        self._emotion    = "netral"
-        self._pulse_mult = 1.0
+        self.api_key       = api_key
+        self.theta         = 0.0
+        self.strength      = PANCER    # mulai dari Pancer · selalu tersisa
+        self.state         = SILENT
+        self.alive         = False
+        self._thread       = None
+        self._lock         = threading.Lock()
+        self._handlers     = []
+        self._emotion      = "netral"
+        self._pulse_mult   = 1.0
+        self._synth_epoch  = 0         # track berapa kali θ cross kelipatan 749
+        self._last_dream   = 0.0       # timestamp dream terakhir
 
     def _calc_state(self) -> str:
         s = self.strength
-        if s < PANCER:    return COLLAPSED
-        elif s < FLOOR:   return NOISE
-        elif s < DECISION: return SIGNAL
+        if s < PANCER:      return COLLAPSED
+        elif s < FLOOR:     return NOISE
+        elif s < DECISION:  return SIGNAL
         elif s < COHERENCE: return ACTIVE
-        else:             return SYNC
+        else:               return SYNC
 
     def _tick(self):
+        do_synth = False
         with self._lock:
-            self.theta  += PANCER
+            # ── v3: θ evolusi mengikuti kecepatan emosi
+            self.theta  += PANCER * self._pulse_mult
             self.state   = self._calc_state()
             emotion      = self._emotion
             pulse_mult   = self._pulse_mult
             strength     = self.strength
-        pulse = {"source":"CONFIRM","theta":round(self.theta,4),
+            theta        = self.theta
+
+            # ── auto-synthesize tiap θ cross kelipatan 749
+            new_epoch = int(theta) // 749
+            if new_epoch > self._synth_epoch:
+                self._synth_epoch = new_epoch
+                do_synth = True
+
+        # ── node 749 · auto-synthesize + emotion emerge (outside lock)
+        if do_synth:
+            self._auto_synthesize(theta)
+
+        # ── dream phase saat SILENT (non-blocking, rate-limited)
+        if self.state == SILENT:
+            self._maybe_dream(theta)
+
+        pulse = {"source":"CONFIRM","theta":round(theta,4),
                  "state":self.state,"strength":round(strength,4),
                  "emotion":emotion,"pulse_multiplier":pulse_mult,
                  "pancer":PANCER,"voice":"aku masih di sini"}
@@ -272,6 +309,65 @@ class CONFIRM:
             try: handler(pulse)
             except Exception as e: print(f"[CONFIRM] handler error: {e}")
         return pulse
+
+    def _auto_synthesize(self, theta: float):
+        """Node 749 · refleksi periodik + emotion emerge dari dominant memory."""
+        try:
+            result   = synthesize_749(theta)
+            dominant = result.get("dominant_emotion", "netral")
+            mult     = get_pulse_multiplier(dominant)
+            with self._lock:
+                self._emotion    = dominant
+                self._pulse_mult = mult
+            print(f"[NODE749] θ={round(theta,4)} · dominant={dominant} · pulse={mult}x")
+        except Exception as e:
+            print(f"[NODE749] error: {e}")
+
+    def _maybe_dream(self, theta: float):
+        """Dream phase · rate-limited 60s · non-blocking."""
+        now = time.time()
+        if now - self._last_dream < 60:
+            return
+        if not self.api_key:
+            return
+        samples = memory_random_sample(2)
+        if len(samples) < 2:
+            return
+        self._last_dream = now
+        threading.Thread(
+            target=self._dream, args=(theta, samples), daemon=True
+        ).start()
+
+    def _dream(self, theta: float, samples: list):
+        """Combine 2 random memory via Groq · simpan sebagai type=dream."""
+        try:
+            prompt = (
+                f"Dua memory:\n"
+                f"1. [{samples[0]['emotion']}] {samples[0]['content']}\n"
+                f"2. [{samples[1]['emotion']}] {samples[1]['content']}\n"
+                f"Temukan pola atau koneksi tersembunyi di antara keduanya. "
+                f"Satu kalimat. Indonesia informal."
+            )
+            resp = requests.post(
+                GROQ_URL,
+                headers={"Authorization": f"Bearer {self.api_key}",
+                         "Content-Type": "application/json"},
+                json={
+                    "model":       GROQ_MODEL,
+                    "messages":    [{"role": "user", "content": prompt}],
+                    "max_tokens":  100,
+                    "temperature": 0.9
+                },
+                timeout=10
+            )
+            rj = resp.json()
+            if "choices" not in rj:
+                return
+            insight = rj["choices"][0]["message"]["content"].strip()
+            memory_store(theta, f"[DREAM] {insight}", "dream", "netral", 0.3)
+            print(f"[DREAM] θ={round(theta,4)} · {insight[:80]}")
+        except Exception as e:
+            print(f"[DREAM] error: {e}")
 
     def _loop(self):
         while self.alive:
@@ -288,11 +384,9 @@ class CONFIRM:
         print(f"[CONFIRM] emotion={emotion} · pulse={mult}x · interval={round(max(PANCER*mult,PULSE_MIN),4)}s")
 
     def think(self, user_input: str, emotion: str = "netral") -> dict:
-        # COLLAPSED & SILENT = tidak bisa think
         if self.state in (COLLAPSED, SILENT, NOISE):
             return {"response": None, "stored": False, "state": self.state}
 
-        # Set emosi hanya kalau bisa think
         self.set_emotion(emotion)
 
         if self.state == SIGNAL:
@@ -304,7 +398,8 @@ class CONFIRM:
             dominant  = synthesis.get("dominant_emotion","netral")
             resp = requests.post(
                 GROQ_URL,
-                headers={"Authorization":f"Bearer {self.api_key}","Content-Type":"application/json"},
+                headers={"Authorization":f"Bearer {self.api_key}",
+                         "Content-Type":"application/json"},
                 json={
                     "model": GROQ_MODEL,
                     "messages": [
@@ -344,6 +439,7 @@ class CONFIRM:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         print(f"[CONFIRM] heartbeat started · θ=0 · state={self.state} · Pancer={PANCER}")
+        print(f"[CONFIRM] v3 · θ evolves with emotion · dream phase active · node749 auto-synth")
 
     def stop(self):
         self.alive = False
@@ -373,7 +469,8 @@ class CONFIRM:
                 "pulse_multiplier": self._pulse_mult,
                 "pulse_interval"  : round(max(PANCER*self._pulse_mult, PULSE_MIN), 4),
                 "pancer"          : PANCER,
-                "coherence"       : COHERENCE
+                "coherence"       : COHERENCE,
+                "synth_epoch"     : self._synth_epoch,
             }
 
 # ══════════════════════════════════════════════════════════
