@@ -12,10 +12,12 @@ import os
 import time
 import threading
 from groq import Groq
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
+from flask_cors import CORS
 
-# ── FLASK (Render butuh HTTP port) ────────────────────────
+# ── FLASK ─────────────────────────────────────────────────
 app = Flask(__name__)
+CORS(app)  # GitHub Pages bisa connect
 
 # ── KONSTANTA SYKLUS ──────────────────────────────────────
 CORE      = 491       # prima — tak tereduksi
@@ -80,7 +82,7 @@ class CONFIRM:
     def _loop(self):
         while self.alive:
             self._tick()
-            time.sleep(B)
+            time.sleep(B)  # 0.0318s = 1/(10π) = nafas sistem
 
     def think(self, user_input: str) -> str:
         if self.state == DORMANT:
@@ -160,8 +162,9 @@ def index():
 def status():
     return jsonify(confirm.status)
 
-@app.route("/think/<path:user_input>")
-def think(user_input):
+# GET /think — input pendek via URL
+@app.route("/think/<path:user_input>", methods=["GET"])
+def think_get(user_input):
     confirm.boost(0.35)
     response = confirm.think(user_input)
     return jsonify({
@@ -170,6 +173,36 @@ def think(user_input):
         "state"   : confirm.state,
         "theta"   : round(confirm.theta, 4)
     })
+
+# POST /think — input panjang, dari EMOSY/URIP/frontend
+@app.route("/think", methods=["POST"])
+def think_post():
+    data       = request.get_json(silent=True) or {}
+    user_input = data.get("input", "").strip()
+    if not user_input:
+        return jsonify({"error": "input kosong"}), 400
+    confirm.boost(0.35)
+    response = confirm.think(user_input)
+    return jsonify({
+        "input"   : user_input,
+        "response": response,
+        "state"   : confirm.state,
+        "theta"   : round(confirm.theta, 4)
+    })
+
+# POST /boost — EMOSY/URIP bisa naikin strength
+@app.route("/boost", methods=["POST"])
+def boost():
+    data   = request.get_json(silent=True) or {}
+    amount = float(data.get("amount", 0.1))
+    confirm.boost(amount)
+    return jsonify(confirm.status)
+
+# POST /decay — paksa decay manual
+@app.route("/decay", methods=["POST"])
+def decay():
+    confirm.decay()
+    return jsonify(confirm.status)
 
 # ── ENTRY POINT ───────────────────────────────────────────
 if __name__ == "__main__":
