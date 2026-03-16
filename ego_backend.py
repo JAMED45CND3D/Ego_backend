@@ -591,7 +591,9 @@ def route_clear():
 # ══════════════════════════════════════════════════════════
 # ── ENTRY
 # ══════════════════════════════════════════════════════════
+# Start heartbeat di sini — biar jalan baik via uvicorn maupun python langsung
+confirm.start()
+
 if __name__ == "__main__":
-    confirm.start()
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
