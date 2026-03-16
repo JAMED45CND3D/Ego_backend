@@ -30,7 +30,7 @@ fi
 # Cek uvicorn tersedia, fallback ke flask dev
 if command -v uvicorn &>/dev/null; then
     echo "◎ server · uvicorn (stable)"
-    uvicorn ego_backend:app --host 0.0.0.0 --port 5000 &
+    uvicorn ego_backend:app --host 0.0.0.0 --port 5000 --interface wsgi &
 else
     echo "◎ server · flask dev"
     echo "  (install uvicorn kapanpun: pip install uvicorn)"
