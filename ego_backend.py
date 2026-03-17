@@ -266,6 +266,7 @@ class CONFIRM:
         self._emotion      = "netral"
         self._pulse_mult   = 1.0
         self._synth_epoch  = 0         # track berapa kali θ cross kelipatan 749
+        self._emosy_epoch  = 0         # track EMOSY · tiap kelipatan 200
         self._last_dream   = 0.0       # timestamp dream terakhir
 
     def _calc_state(self) -> str:
@@ -278,6 +279,7 @@ class CONFIRM:
 
     def _tick(self):
         do_synth = False
+        do_emosy  = False
         with self._lock:
             # ── v3: θ evolusi mengikuti kecepatan emosi
             self.theta  += PANCER * self._pulse_mult
@@ -293,9 +295,21 @@ class CONFIRM:
                 self._synth_epoch = new_epoch
                 do_synth = True
 
+            # ── EMOSY · emotion emerge tiap θ cross kelipatan 200
+            new_emosy = int(theta) // 200
+            if new_emosy > self._emosy_epoch:
+                self._emosy_epoch = new_emosy
+                do_emosy = True
+            else:
+                do_emosy = False
+
         # ── node 749 · auto-synthesize + emotion emerge (outside lock)
         if do_synth:
             self._auto_synthesize(theta)
+
+        # ── EMOSY · emotion emerge dari memory cluster (outside lock)
+        if do_emosy:
+            self._emosy_emerge(theta)
 
         # ── dream phase saat SILENT (non-blocking, rate-limited)
         if self.state == SILENT:
@@ -322,6 +336,39 @@ class CONFIRM:
             print(f"[NODE749] θ={round(theta,4)} · dominant={dominant} · pulse={mult}x")
         except Exception as e:
             print(f"[NODE749] error: {e}")
+
+    def _emosy_emerge(self, theta: float):
+        """EMOSY · hitung distribusi emosi dari memory cluster · set emosi dominant."""
+        try:
+            con = get_con()
+            cur = con.cursor()
+            # Ambil 20 memory terbaru berdasarkan resonansi
+            cur.execute(
+                "SELECT emotion, resonance FROM memories ORDER BY resonance DESC LIMIT 20"
+            )
+            rows = cur.fetchall()
+            con.close()
+            if not rows:
+                return
+
+            # Hitung weighted score per emosi
+            scores = {}
+            for emotion, resonance in rows:
+                scores[emotion] = scores.get(emotion, 0) + resonance
+
+            # Dominant = emosi dengan total resonansi tertinggi
+            dominant = max(scores, key=scores.get)
+            total    = sum(scores.values())
+            pct      = round(scores[dominant] / total * 100, 1)
+            mult     = get_pulse_multiplier(dominant)
+
+            with self._lock:
+                self._emotion    = dominant
+                self._pulse_mult = mult
+
+            print(f"[EMOSY] θ={round(theta,4)} · emerge={dominant} ({pct}%) · pulse={mult}x")
+        except Exception as e:
+            print(f"[EMOSY] error: {e}")
 
     def _maybe_dream(self, theta: float):
         """Dream phase · rate-limited 60s · non-blocking."""
