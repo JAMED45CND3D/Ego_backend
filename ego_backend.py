@@ -151,8 +151,6 @@ def init_db():
             cur.execute(f"ALTER TABLE memories ADD COLUMN {col} {defn}")
         except Exception:
             pass
-    con.commit()
-    con.close()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS goals (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -164,9 +162,9 @@ def init_db():
             created_at      REAL    NOT NULL
         )
     """)
-    print("[HORCRUX] memory.db ready · neural edition v6 · identity + meta")
     con.commit()
     con.close()
+    print("[HORCRUX] memory.db ready · neural edition v6 · identity + meta")
 
 def get_con():
     return sqlite3.connect(DB_PATH)
