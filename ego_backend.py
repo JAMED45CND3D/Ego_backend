@@ -499,7 +499,7 @@ def think_post():
     emotion    = data.get("emotion","netral")
     if not user_input:
         return jsonify({"error":"input kosong"}), 400
-    confirm.boost(0.35)
+    confirm.boost(0.65)
     result = confirm.think(user_input, emotion)
     return jsonify({"input":user_input,"theta":round(confirm.theta,4),**result})
 
