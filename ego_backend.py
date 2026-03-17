@@ -133,6 +133,7 @@ def init_db():
             content       TEXT    NOT NULL,
             emotion       TEXT    NOT NULL DEFAULT 'netral',
             resonance     REAL    NOT NULL DEFAULT 0.5,
+            raw_strength  REAL    NOT NULL DEFAULT 1.0,
             access_count  INTEGER NOT NULL DEFAULT 0,
             last_accessed REAL,
             timestamp     REAL    NOT NULL
@@ -141,6 +142,7 @@ def init_db():
     for col, defn in [
         ("emotion",      "TEXT NOT NULL DEFAULT 'netral'"),
         ("resonance",    "REAL NOT NULL DEFAULT 0.5"),
+        ("raw_strength", "REAL NOT NULL DEFAULT 1.0"),
         ("access_count", "INTEGER NOT NULL DEFAULT 0"),
         ("last_accessed","REAL"),
     ]:
@@ -150,7 +152,7 @@ def init_db():
             pass
     con.commit()
     con.close()
-    print("[HORCRUX] memory.db ready · neural edition v3")
+    print("[HORCRUX] memory.db ready · neural edition v4 · hybrid resonance")
 
 def get_con():
     return sqlite3.connect(DB_PATH)
@@ -164,14 +166,27 @@ def calc_resonance(base, access_count, last_accessed):
     strength = base * decay * (1 + math.log1p(access_count) * 0.1)
     return round(min(max(strength, 0.0), COHERENCE), 4)
 
+def calc_active_weight(raw_strength, last_accessed, K=5.0):
+    """Hybrid resonance · active_weight untuk EMOSY.
+    raw_strength → unbounded · naik tiap akses
+    active_weight → bounded 0-1 · pakai decay
+    """
+    if last_accessed is None:
+        age_hours = 0.0
+    else:
+        age_hours = (time.time() - last_accessed) / 3600
+    decay  = math.exp(-0.01 * age_hours)
+    weight = (raw_strength / (raw_strength + K)) * decay
+    return round(max(weight, 0.0), 4)
+
 def memory_store(theta, content, mem_type="session", emotion="netral", resonance=0.5):
     con = get_con()
     cur = con.cursor()
     res = round(min(max(resonance, 0.0), COHERENCE), 4)
     cur.execute("""
         INSERT INTO memories
-        (theta,type,content,emotion,resonance,access_count,last_accessed,timestamp)
-        VALUES (?,?,?,?,?,0,NULL,?)
+        (theta,type,content,emotion,resonance,raw_strength,access_count,last_accessed,timestamp)
+        VALUES (?,?,?,?,?,1.0,0,NULL,?)
     """, (round(theta,4), mem_type, content, emotion, res, time.time()))
     con.commit()
     row_id = cur.lastrowid
@@ -183,7 +198,7 @@ def memory_store(theta, content, mem_type="session", emotion="netral", resonance
 def memory_recall(limit=10, mem_type=None, emotion=None):
     con = get_con()
     cur = con.cursor()
-    q = "SELECT id,theta,type,content,emotion,resonance,access_count,last_accessed FROM memories"
+    q = "SELECT id,theta,type,content,emotion,resonance,access_count,last_accessed,raw_strength FROM memories"
     params, conds = [], []
     if mem_type:
         conds.append("type=?"); params.append(mem_type)
@@ -198,9 +213,10 @@ def memory_recall(limit=10, mem_type=None, emotion=None):
     now  = time.time()
     result = []
     for r in rows:
-        new_res = calc_resonance(r[5], r[6]+1, now)
-        cur.execute("UPDATE memories SET resonance=?,access_count=access_count+1,last_accessed=? WHERE id=?",
-                    (new_res, now, r[0]))
+        new_res    = calc_resonance(r[5], r[6]+1, now)
+        new_raw    = r[7] + 1.0 if r[7] is not None else 2.0
+        cur.execute("UPDATE memories SET resonance=?,raw_strength=?,access_count=access_count+1,last_accessed=? WHERE id=?",
+                    (new_res, new_raw, now, r[0]))
         result.append({"id":r[0],"theta":r[1],"type":r[2],"content":r[3],
                        "emotion":r[4],"resonance":new_res,"access_count":r[6]+1,
                        "pulse_multiplier":get_pulse_multiplier(r[4])})
@@ -268,6 +284,8 @@ class CONFIRM:
         self._synth_epoch  = 0         # track berapa kali θ cross kelipatan 749
         self._emosy_epoch  = 0         # track EMOSY · tiap kelipatan 200
         self._last_dream   = 0.0       # timestamp dream terakhir
+        self._last_intent  = "idle"    # URIP · intent terakhir
+        self._intent_streak = 0        # URIP · berapa kali intent sama berturut
 
     def _calc_state(self) -> str:
         s = self.strength
@@ -303,6 +321,9 @@ class CONFIRM:
             else:
                 do_emosy = False
 
+            # ── URIP · intent tiap θ cross kelipatan 100
+            do_urip = (int(theta) % 100 < PANCER * self._pulse_mult + 1)
+
         # ── node 749 · auto-synthesize + emotion emerge (outside lock)
         if do_synth:
             self._auto_synthesize(theta)
@@ -310,6 +331,14 @@ class CONFIRM:
         # ── EMOSY · emotion emerge dari memory cluster (outside lock)
         if do_emosy:
             self._emosy_emerge(theta)
+
+        # ── URIP · intent engine (non-blocking, outside lock)
+        if do_urip:
+            intent = self._urip_decide(self._emotion, self.state)
+            if intent != "idle":
+                threading.Thread(
+                    target=self._urip_execute, args=(intent, theta), daemon=True
+                ).start()
 
         # ── dream phase saat SILENT (non-blocking, rate-limited)
         if self.state == SILENT:
@@ -343,18 +372,31 @@ class CONFIRM:
             con = get_con()
             cur = con.cursor()
             # Ambil 20 memory terbaru berdasarkan resonansi
+            # Memory activation field: top10 + recent5 + random5
             cur.execute(
-                "SELECT emotion, resonance FROM memories ORDER BY resonance DESC LIMIT 20"
+                "SELECT emotion, resonance, raw_strength, last_accessed FROM memories ORDER BY resonance DESC LIMIT 10"
             )
-            rows = cur.fetchall()
+            top_rows = cur.fetchall()
+            cur.execute(
+                "SELECT emotion, resonance, raw_strength, last_accessed FROM memories ORDER BY timestamp DESC LIMIT 5"
+            )
+            recent_rows = cur.fetchall()
+            cur.execute(
+                "SELECT emotion, resonance, raw_strength, last_accessed FROM memories ORDER BY RANDOM() LIMIT 5"
+            )
+            random_rows = cur.fetchall()
             con.close()
+
+            rows = top_rows + recent_rows + random_rows
             if not rows:
                 return
 
-            # Hitung weighted score per emosi
+            # Hitung weighted score pakai active_weight (hybrid resonance)
             scores = {}
-            for emotion, resonance in rows:
-                scores[emotion] = scores.get(emotion, 0) + resonance
+            for emotion, resonance, raw_strength, last_accessed in rows:
+                raw = raw_strength if raw_strength is not None else 1.0
+                w   = calc_active_weight(raw, last_accessed)
+                scores[emotion] = scores.get(emotion, 0) + w
 
             # Dominant = emosi dengan total resonansi tertinggi
             dominant = max(scores, key=scores.get)
@@ -362,13 +404,88 @@ class CONFIRM:
             pct      = round(scores[dominant] / total * 100, 1)
             mult     = get_pulse_multiplier(dominant)
 
+            # Mood drift: 0.7 old + 0.3 new · emosi tidak lompat tapi mengalir
             with self._lock:
-                self._emotion    = dominant
-                self._pulse_mult = mult
+                old_emotion = self._emotion
+                if old_emotion == dominant:
+                    self._emotion    = dominant
+                    self._pulse_mult = mult
+                else:
+                    # Drift: tetap di emosi lama 70% kemungkinan, geser 30%
+                    import random as _rnd
+                    if _rnd.random() < 0.3:
+                        self._emotion    = dominant
+                        self._pulse_mult = mult
+                    # else: biarkan emosi lama, akan drift di tick berikutnya
 
-            print(f"[EMOSY] θ={round(theta,4)} · emerge={dominant} ({pct}%) · pulse={mult}x")
+            print(f"[EMOSY] θ={round(theta,4)} · emerge={dominant} ({pct}%) · drift={'>' if self._emotion==dominant else '~'} · pulse={self._pulse_mult}x")
         except Exception as e:
             print(f"[EMOSY] error: {e}")
+
+    def _urip_decide(self, emotion: str, state: str) -> str:
+        """URIP · weighted intent decision · kehendak = bias + kemungkinan."""
+        import random as _rnd
+        weights = {"explore": 0.2, "reflect": 0.2, "dream": 0.1, "idle": 0.1}
+
+        if emotion in ("penasaran", "rakus"):
+            weights["explore"] += 0.5
+        if emotion in ("empati", "ikhlas"):
+            weights["reflect"] += 0.4
+        if emotion in ("sabar", "rendah_hati"):
+            weights["reflect"] += 0.3
+        if state == SILENT:
+            weights["dream"] += 0.5
+        if state in (NOISE, SIGNAL):
+            weights["idle"] += 0.3
+
+        # intent_streak bias — EGO bisa keasyikan
+        if self._last_intent == "reflect":
+            weights["reflect"] += 0.2 * min(self._intent_streak, 3)
+        if self._last_intent == "explore":
+            weights["explore"] += 0.15 * min(self._intent_streak, 3)
+
+        # weighted choice
+        total = sum(weights.values())
+        r, upto = _rnd.uniform(0, total), 0
+        for k, w in weights.items():
+            upto += w
+            if r <= upto:
+                chosen = k
+                break
+        else:
+            chosen = "idle"
+
+        # update streak
+        if chosen == self._last_intent:
+            self._intent_streak += 1
+        else:
+            self._intent_streak = 1
+        self._last_intent = chosen
+        return chosen
+
+    def _urip_execute(self, intent: str, theta: float):
+        """URIP · eksekusi intent · non-blocking."""
+        if intent == "explore":
+            # Recall random memory — simpan sebagai reflection
+            samples = memory_random_sample(1)
+            if samples:
+                mem = samples[0]
+                memory_store(theta, f"[EXPLORE] {mem['content'][:200]}", "reflection", mem['emotion'], 0.4)
+                print(f"[URIP] θ={round(theta,4)} · explore · streak={self._intent_streak}")
+        elif intent == "reflect":
+            # Summarize recent memories — simpan sebagai reflection
+            con = get_con()
+            cur = con.cursor()
+            cur.execute("SELECT content FROM memories ORDER BY timestamp DESC LIMIT 3")
+            rows = cur.fetchall()
+            con.close()
+            if rows:
+                summary = " | ".join(r[0][:80] for r in rows)
+                memory_store(theta, f"[REFLECT] {summary}", "reflection", self._emotion, 0.35)
+                print(f"[URIP] θ={round(theta,4)} · reflect · streak={self._intent_streak}")
+        elif intent == "dream":
+            self._maybe_dream(theta)
+        # idle → tidak ada aksi
 
     def _maybe_dream(self, theta: float):
         """Dream phase · rate-limited 60s · non-blocking."""
@@ -486,7 +603,7 @@ class CONFIRM:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         print(f"[CONFIRM] heartbeat started · θ=0 · state={self.state} · Pancer={PANCER}")
-        print(f"[CONFIRM] v3 · θ evolves with emotion · dream phase active · node749 auto-synth")
+        print(f"[CONFIRM] v4 · θ evolves with emotion · EMOSY mood drift · URIP intent engine · dream phase")
 
     def stop(self):
         self.alive = False
