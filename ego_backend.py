@@ -502,7 +502,7 @@ def memory_recall(limit=10, mem_type=None, emotion=None):
     result = []
     for r in rows:
         new_res = calc_resonance(r[5], r[6]+1, now)
-        new_raw = min((r[8] if r[8] is not None else 1.0) + 1.0, 100.0)  # FIX: cap raw_strength
+        new_raw = (r[8] if r[8] is not None else 1.0) + 1.0
         cur.execute("UPDATE memories SET resonance=?,raw_strength=?,access_count=access_count+1,last_accessed=? WHERE id=?",
                     (new_res, new_raw, now, r[0]))
         result.append({"id":r[0],"theta":r[1],"type":r[2],"content":r[3],
@@ -579,7 +579,6 @@ class CONFIRM:
     def _calc_state(self) -> str:
         s = self.strength
         if s < PANCER:      return COLLAPSED
-        elif s == PANCER:   return SILENT    # FIX: SILENT state yang hilang
         elif s < FLOOR:     return NOISE
         elif s < DECISION:  return SIGNAL
         elif s < COHERENCE: return ACTIVE
@@ -699,7 +698,7 @@ class CONFIRM:
             mult     = get_pulse_multiplier(dominant)
             with self._lock:
                 old_emotion = self._emotion
-                if old_emotion != dominant or random.random() < 0.3:  # FIX: update kalau beda
+                if old_emotion == dominant or random.random() < 0.3:
                     self._emotion    = dominant
                     self._pulse_mult = mult
             print(f"[EMOSY] θ={round(theta,4)} · emerge={dominant} ({pct}%)")
@@ -1168,8 +1167,7 @@ def route_connected(urip_id):
     result = memory_recall_connected(urip_id, limit)
     return jsonify(result)
 
-@app.route("/goals", methods=["GET"])   # FIX: route yang hilang
-def route_goals():
+
     return jsonify(goal_list())
 
 @app.route("/goals/clear", methods=["POST"])
@@ -1192,7 +1190,7 @@ def route_identity_statements():
     return jsonify(confirm._identity.get("self_statements", []))
 
 # ── ENTRY
-confirm.start()  # jantung nyala saat import — aman untuk gunicorn + Termux
+confirm.start()
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
