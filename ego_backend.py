@@ -1192,7 +1192,8 @@ def route_identity_statements():
     return jsonify(confirm._identity.get("self_statements", []))
 
 # ── ENTRY
+confirm.start()  # jantung nyala saat import — aman untuk gunicorn + Termux
+
 if __name__ == "__main__":
-    confirm.start()  # FIX: heartbeat hanya jalan kalau file dijalankan langsung
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
