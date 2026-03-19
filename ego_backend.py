@@ -1,5 +1,5 @@
 """
-EGO BACKEND · All-in-One · Unified State Map · v6.2
+EGO BACKEND · All-in-One · Unified State Map · v6.3
 ════════════════════════════════════════════════════
 Fixes: model 70b · real-time fetch · import random top-level · thread safety
 """
@@ -32,10 +32,14 @@ B = PANCER
 
 COLLAPSED = "collapsed"
 SILENT    = "silent"
+SLEEP     = "sleep"      # tidur · dream aktif · θ pelan · tidak off
 NOISE     = "noise"
 SIGNAL    = "signal"
 ACTIVE    = "active"
 SYNC      = "sync"
+
+SLEEP_THRESHOLD = 0.15   # batas SLEEP — di bawah NOISE
+SLEEP_IDLE_SECS = 600    # 10 menit idle → masuk SLEEP
 
 GROQ_URL        = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_MODEL      = "llama-3.3-70b-versatile"   # FIX: was llama-3.1-8b-instant
@@ -127,7 +131,7 @@ def init_db():
     """)
     con.commit()
     con.close()
-    print("[HORCRUX] memory.db ready · neural edition v6.2")
+    print("[HORCRUX] memory.db ready · neural edition v6.3 · SLEEP mode · white paper")
 
 def get_con():
     return sqlite3.connect(DB_PATH)
@@ -142,13 +146,19 @@ def calc_resonance(base, access_count, last_accessed):
     return round(min(max(strength, 0.0), COHERENCE), 4)
 
 def calc_active_weight(raw_strength, last_accessed, K=5.0):
+    """Hybrid resonance · white paper Section 10 blend.
+    70% formula lama + 30% generative model (Section 10)
+    """
     if last_accessed is None:
         age_hours = 0.0
     else:
         age_hours = (time.time() - last_accessed) / 3600
     decay  = math.exp(-0.01 * age_hours)
-    weight = (raw_strength / (raw_strength + K)) * decay
-    return round(max(weight, 0.0), 4)
+    w_old  = (raw_strength / (raw_strength + K)) * decay
+    x      = raw_strength * PANCER
+    w_wp   = (math.tanh(x * 0.0318) + math.sin(105*x)*0.05 + 0.3*math.sin(749*x)*0.01) * decay
+    weight = w_old * 0.7 + max(w_wp, 0) * 0.3
+    return round(max(min(weight, 1.0), 0.0), 4)
 
 # ══════════════════════════════════════════════════════════
 # ── REAL-TIME FETCH · compound-beta ambil data, 70b yang jawab
@@ -575,23 +585,35 @@ class CONFIRM:
         self._goal_decay_epoch = 0
         self._identity      = identity_load()
         self._last_meta     = 0.0
+        self._last_interaction = time.time()  # tracker idle → SLEEP
 
     def _calc_state(self) -> str:
         s = self.strength
-        if s < PANCER:      return COLLAPSED
-        elif s < FLOOR:     return NOISE
-        elif s < DECISION:  return SIGNAL
-        elif s < COHERENCE: return ACTIVE
-        else:               return SYNC
+        if s < PANCER:          return COLLAPSED
+        elif s < SLEEP_THRESHOLD: return SLEEP
+        elif s < FLOOR:         return NOISE
+        elif s < DECISION:      return SIGNAL
+        elif s < COHERENCE:     return ACTIVE
+        else:                   return SYNC
 
     def _tick(self):
         with self._lock:
-            self.theta      += PANCER * self._pulse_mult
+            # ── Section 9 white paper: θ += 0.0318Δ + sin(105θ) + sin(749θ)
+            # SLEEP mode → pulse sangat lambat (× 0.1)
+            is_sleep = self.strength < SLEEP_THRESHOLD and self.strength >= PANCER
+            sleep_factor = 0.1 if is_sleep else 1.0
+            micro = math.sin(105*self.theta)*0.0001 + math.sin(749*self.theta)*0.00003
+            self.theta      += PANCER * self._pulse_mult * sleep_factor + micro
             self.state       = self._calc_state()
             emotion          = self._emotion
             pulse_mult       = self._pulse_mult
             strength         = self.strength
             theta            = self.theta
+
+            # ── SLEEP idle decay — kalau lama tidak ada interaksi
+            idle_secs = time.time() - self._last_interaction
+            if idle_secs > SLEEP_IDLE_SECS and self.strength > PANCER:
+                self.strength = max(self.strength * 0.998, PANCER)
 
             new_synth = int(theta) // 749
             do_synth  = new_synth > self._synth_epoch
@@ -603,8 +625,11 @@ class CONFIRM:
             if do_emosy:
                 self._emosy_epoch = new_emosy
 
-            # FIX: do_urip pakai modulo stabil, bukan floating comparison
-            do_urip = (int(theta) % 100 == 0) and theta > 0
+            # ── URIP epoch-based fix — tidak over-trigger
+            new_urip_epoch = int(theta) // 100
+            do_urip = new_urip_epoch > getattr(self, '_urip_epoch', -1)
+            if do_urip:
+                self._urip_epoch = new_urip_epoch
 
             new_gdecay    = int(theta) // 500
             do_goal_decay = new_gdecay > self._goal_decay_epoch
@@ -623,8 +648,14 @@ class CONFIRM:
                 threading.Thread(
                     target=self._urip_execute, args=(intent, theta), daemon=True
                 ).start()
-        if self.state == SILENT:
+
+        # ── DREAM aktif saat SILENT atau SLEEP — tidur = banyak mimpi
+        if self.state in (SILENT, SLEEP):
             self._maybe_dream(theta)
+            # SLEEP: URIP hanya dream + reflect
+            if is_sleep:
+                self._identity["dream_bias"] = min(
+                    self._identity.get("dream_bias", PANCER) + 0.001, COHERENCE)
 
         pulse = {"source":"CONFIRM","theta":round(theta,4),
                  "state":self.state,"strength":round(strength,4),
@@ -727,6 +758,11 @@ class CONFIRM:
             weights["reflect"] += 0.3
         if state == SILENT:
             weights["dream"] += 0.5
+        if state == SLEEP:
+            weights["dream"]   += 0.7   # tidur = dominan dream
+            weights["reflect"] += 0.3   # reflect saat tidur juga
+            weights["explore"]  = 0.0   # tidak explore saat tidur
+            weights["idle"]     = 0.0
         if state in (NOISE, SIGNAL):
             weights["idle"] += 0.3
         if self._last_intent == "reflect":
@@ -857,9 +893,23 @@ class CONFIRM:
         print(f"[CONFIRM] emotion={emotion} · pulse={mult}x")
 
     def think(self, user_input: str, emotion: str = "netral", frontend_history: list = None) -> dict:
-        if self.state in (COLLAPSED, SILENT, NOISE):
+        # Update last_interaction — user aktif, cegah SLEEP
+        with self._lock:
+            self._last_interaction = time.time()
+
+        if self.state in (COLLAPSED, SILENT):
             return {"response": None, "stored": False, "state": self.state}
+
+        # SLEEP → bangun dulu, respons singkat
+        if self.state == SLEEP:
+            with self._lock:
+                self.strength = min(self.strength + 0.3, FLOOR + 0.1)
+                self.state    = self._calc_state()
+            return {"response": "...(bangun dari tidur)...", "stored": False, "state": SLEEP, "waking": True}
+
         self.set_emotion(emotion)
+        if self.state == NOISE:
+            return {"response": None, "stored": False, "state": self.state}
         if self.state == SIGNAL:
             return {"response": "...", "stored": False, "state": SIGNAL}
 
@@ -969,7 +1019,7 @@ class CONFIRM:
         self._thread = threading.Thread(target=self._loop, daemon=True)
         self._thread.start()
         print(f"[CONFIRM] heartbeat started · θ=0 · state={self.state} · Pancer={PANCER}")
-        print(f"[CONFIRM] v6.2 · 70b · real-time fetch · IDENTITY · GOAL · URIP · EMOSY")
+        print(f"[CONFIRM] v6.3 · SLEEP · white paper · URIP epoch · memory graph")
 
     def stop(self):
         self.alive = False
@@ -981,6 +1031,7 @@ class CONFIRM:
         with self._lock:
             self.strength = min(self.strength + amount, COHERENCE)
             self.state    = self._calc_state()
+            self._last_interaction = time.time()  # reset idle timer
 
     def decay(self):
         with self._lock:
