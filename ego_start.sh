@@ -42,6 +42,12 @@ for i in $(seq 1 60); do
   sleep 1
 done
 
+# Start Server 2 — /think engine
+python ego_think.py &
+THINK_PID=$!
+echo "◎ think engine started · PID=$THINK_PID"
+sleep 2
+
 echo "◎ feeding nucleus..."
 python feed_nucleus.py 2>/dev/null && echo "   nucleus · OK" || echo "   nucleus · skip"
 
