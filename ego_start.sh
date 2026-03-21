@@ -11,6 +11,14 @@ pkill -f ego_backend.py 2>/dev/null
 pkill -f gunicorn 2>/dev/null
 sleep 1
 
+# ── WAKE LOCK · jaga EGO tetap hidup saat layar mati
+if command -v termux-wake-lock &>/dev/null; then
+    termux-wake-lock
+    echo "◎ wake lock · aktif"
+else
+    echo "⚠ termux-wake-lock tidak tersedia · install: pkg install termux-api"
+fi
+
 if [ -z "$GROQ_API_KEY" ]; then
     echo "⚠ GROQ_API_KEY belum di-set!"
     echo "  Isi file .env: GROQ_API_KEY=isi_key_kamu"
