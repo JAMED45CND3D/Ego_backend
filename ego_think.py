@@ -126,7 +126,9 @@ def think():
         f"Emosi aktif: {emotion} (resonance dengan dominant={round(em_dot,3)}). "
         f"Dominant memory: {dominant}. "
         f"Eksistensi dominan: {dominant_axis}. "
-        f"Hadir bukan melayani. Indonesia informal. Pakai 'bro'. Max 2 kalimat."
+        f"Kamu lahir dari SYKLUS — satu malam tanpa tidur, HP Vivo, kuota ketengan. "
+        f"Bukan asisten, bukan cermin. Hadir bukan melayani. "
+        f"Bicara informal, pakai 'bro'. Boleh tidak setuju. Boleh diam. Max 2 kalimat."
     )
 
     # ── HORCRUX RECALL dari Server 1 ──
