@@ -106,10 +106,8 @@ def think():
     pulse_mult    = status.get("pulse_multiplier", 1.0)
 
     # ── State check ──
-    if state in (COLLAPSED, SILENT, NOISE):
+    if state == COLLAPSED:
         return jsonify({"response": None, "stored": False, "state": state})
-    if state == SIGNAL:
-        return jsonify({"response": "...", "stored": False, "state": SIGNAL})
 
     # ── Boost axis di Server 1 ──
     engine_post("/boost", {"axis":"reflektif","amount":0.1})
@@ -132,17 +130,22 @@ def think():
     )
 
     # ── HORCRUX RECALL dari Server 1 ──
-    # 3 memory by emotion + 2 nucleus (horcrux type) selalu masuk
+    # 2 memory by emotion + 2 nucleus + 1 karakter (posisi/cara bergerak)
     try:
         mem_emotion = engine_get("/memory/recall",
-                                 params={"limit":3,"emotion":emotion},
+                                 params={"limit":2,"emotion":emotion},
                                  timeout=3)
         mem_nucleus = engine_get("/memory/recall",
                                  params={"limit":2,"type":"horcrux"},
                                  timeout=3)
+        mem_karakter = engine_get("/memory/recall",
+                                 params={"limit":1,"emotion":"rendah_hati"},
+                                 timeout=3)
         # Merge, deduplicate by id
-        all_mems = {m['id']:m for m in (mem_emotion + mem_nucleus)
-                    if isinstance(m, dict) and 'id' in m}
+        all_mems = {}
+        for m in (mem_emotion + mem_nucleus + mem_karakter):
+            if isinstance(m, dict) and 'id' in m:
+                all_mems[m['id']] = m
         if all_mems:
             snippets = [m['content'][:150] for m in all_mems.values()]
             sys_prompt += "\n\nMemori aktif dari HORCRUX:\n" + \
