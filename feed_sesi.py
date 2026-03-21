@@ -8,6 +8,7 @@ import requests
 import time
 
 BACKEND = "http://localhost:5000"
+PANCER  = 0.0318
 
 memories = [
 
@@ -115,7 +116,7 @@ def feed():
                 "emotion":   mem["emotion"],
                 "type":      mem["type"],
                 "resonance": mem["resonance"],
-                "theta":     theta + i * 0.01
+                "theta":     round(theta + i * PANCER, 4)
             }, timeout=5)
             result = r.json()
             print(f"  [{i+1}/{len(memories)}] stored · id={result.get('id')} · {mem['emotion']}")

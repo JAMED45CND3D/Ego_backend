@@ -125,7 +125,7 @@ def emotion_field(emotion: str) -> dict:
     """Field 3D dari emosi."""
     ax = EMOTION_AXIS.get(emotion, [0,0,0])
     r  = math.sqrt(sum(x*x for x in ax)) * G[3]
-    return jsonify({"axis": ax, "radius": round(r, 4), "layer": "8Y"})
+    return {"axis": ax, "radius": round(r, 4), "layer": "8Y"}
 
 # ══════════════════════════════════════════════════════════
 # ── LAYER 2 · 6 · HORCRUX · OCTAHEDRON
@@ -276,9 +276,9 @@ def memory_store(theta_scalar, content, mem_type="ekspansi",
           mem_type, ax[0], ax[1], ax[2],
           content, emotion, final_res, time.time()))
     con.commit(); row_id = cur.lastrowid; con.close()
-    return jsonify({"id": row_id, "theta": round(theta_scalar,4), "type": mem_type,
+    return {"id": row_id, "theta": round(theta_scalar,4), "type": mem_type,
             "axis": ax, "content": content, "emotion": emotion,
-            "resonance": final_res, "em_resonance": em_res})
+            "resonance": final_res, "em_resonance": em_res}
 
 def memory_recall(limit=10, mem_type=None, emotion=None):
     con = get_con(); cur = con.cursor()
@@ -304,7 +304,7 @@ def memory_random_sample(n=2):
     con = get_con(); cur = con.cursor()
     cur.execute("SELECT content,emotion,type FROM memories ORDER BY RANDOM() LIMIT ?", (n,))
     rows = cur.fetchall(); con.close()
-    return jsonify([{"content":r[0],"emotion":r[1],"type":r[2]} for r in rows])
+    return [{"content":r[0],"emotion":r[1],"type":r[2]} for r in rows]
 
 def memory_count():
     con = get_con(); cur = con.cursor()
@@ -314,28 +314,27 @@ def memory_count():
     # count per axis
     cur.execute("SELECT type,COUNT(*) FROM memories GROUP BY type"); axis_counts = dict(cur.fetchall())
     con.close()
-    return jsonify({"total":total,"nucleus":nucleus,"avg_resonance":round(avg_res,4),
+    return {"total":total,"nucleus":nucleus,"avg_resonance":round(avg_res,4),
             "shell_1":DECAY_K,"shell_2":TIME_SC,
             "at_shell_1":total>=DECAY_K,"at_shell_2":total>=TIME_SC,
-            "by_axis":axis_counts})
+            "by_axis":axis_counts}
 
 def synthesize_749(theta_scalar):
     con = get_con(); cur = con.cursor()
     cur.execute("SELECT emotion,AVG(resonance),COUNT(*),type FROM memories GROUP BY emotion ORDER BY AVG(resonance) DESC LIMIT 7")
     rows = cur.fetchall(); con.close()
     if not rows:
-        return jsonify({"node":DECAY_K,"theta":round(theta_scalar,4),"dominant_emotion":"netral",
+        return {"node":DECAY_K,"theta":round(theta_scalar,4),"dominant_emotion":"netral",
                 "pulse_multiplier":1.0,"synthesis":[],
-                "voice":"node 749 · kosong · menunggu memory"})
+                "voice":"node 749 · kosong · menunggu memory"}
     dominant = rows[0][0]
     synthesis = [{"emotion":r[0],"avg_resonance":round(r[1],4),"memory_count":r[2],
                   "axis":EMOTION_AXIS.get(r[0],[0,0,0]),
                   "pulse_multiplier":get_pulse_multiplier(r[0])} for r in rows]
-    return jsonify({"node":DECAY_K,"theta":round(theta_scalar,4),"dominant_emotion":dominant,
+    return {"node":DECAY_K,"theta":round(theta_scalar,4),"dominant_emotion":dominant,
             "pulse_multiplier":get_pulse_multiplier(dominant),
             "synthesis":synthesis,"emotion_field":emotion_field(dominant),
-            "voice":f"sintesis · dominant={dominant} · θ={round(theta_scalar,4)}"})
-
+            "voice":f"sintesis · dominant={dominant} · θ={round(theta_scalar,4)}"}
 # ══════════════════════════════════════════════════════════
 # ── URIP · ENTITY RECOGNITION ENGINE (12X layer)
 # ══════════════════════════════════════════════════════════
@@ -357,7 +356,7 @@ def _text_to_field(text: str) -> list:
         field[axis_idx] += h * PANCER
     # normalize
     mag = math.sqrt(sum(x*x for x in field)) or 1.0
-    return jsonify([round(x/mag, 4) for x in field])
+    return [round(x/mag, 4) for x in field]
 
 def _field_similarity(f1: list, f2: list) -> float:
     """Cosine similarity antara dua field 12D."""
@@ -375,11 +374,11 @@ def entity_register(name: str, initial_text: str = "") -> dict:
             VALUES (?,?,0,NULL,?)
         """, (name, json.dumps(field), time.time()))
         con.commit(); eid = cur.lastrowid; con.close()
-        return jsonify({"id":eid,"name":name,"field":field,"status":"registered"})
+        return {"id":eid,"name":name,"field":field,"status":"registered"}
     except sqlite3.IntegrityError:
         cur.execute("SELECT id,field_json FROM entities WHERE name=?", (name,))
         row = cur.fetchone(); con.close()
-        return jsonify({"id":row[0],"name":name,"field":json.loads(row[1]),"status":"exists"})
+        return {"id":row[0],"name":name,"field":json.loads(row[1]),"status":"exists"}
 
 def entity_inject(name: str, text: str, emotion: str = "netral") -> dict:
     """Injek interaksi ke entitas — update field."""
@@ -404,8 +403,8 @@ def entity_inject(name: str, text: str, emotion: str = "netral") -> dict:
         WHERE id=?
     """, (json.dumps(merged), time.time(), eid))
     con.commit(); con.close()
-    return jsonify({"id":eid,"name":name,"field":merged,
-            "interaction_count":count+1,"status":"updated"})
+    return {"id":eid,"name":name,"field":merged,
+            "interaction_count":count+1,"status":"updated"}
 
 def entity_match(text: str, threshold: float = 0.5) -> dict:
     """Cocokkan teks ke entitas yang dikenal."""
@@ -414,7 +413,7 @@ def entity_match(text: str, threshold: float = 0.5) -> dict:
     cur.execute("SELECT id,name,field_json,interaction_count,last_seen FROM entities")
     rows = cur.fetchall(); con.close()
     if not rows:
-        return jsonify({"matched": False, "candidates": [], "query_field": query_field})
+        return {"matched": False, "candidates": [], "query_field": query_field}
     scored = []
     for r in rows:
         field = json.loads(r[2])
@@ -423,21 +422,21 @@ def entity_match(text: str, threshold: float = 0.5) -> dict:
                        "interaction_count":r[3],"last_seen":r[4]})
     scored.sort(key=lambda x: x["similarity"], reverse=True)
     best = scored[0]
-    return jsonify({
+    return {
         "matched":    best["similarity"] >= threshold,
         "best_match": best if best["similarity"] >= threshold else None,
         "similarity": best["similarity"],
         "threshold":  threshold,
         "candidates": scored[:5],
         "query_field": query_field,
-            })
+    }
 
 def entity_list() -> list:
     con = get_con(); cur = con.cursor()
     cur.execute("SELECT id,name,interaction_count,last_seen,created FROM entities ORDER BY interaction_count DESC")
     rows = cur.fetchall(); con.close()
-    return jsonify([{"id":r[0],"name":r[1],"interaction_count":r[2],
-             "last_seen":r[3],"created":r[4]} for r in rows])
+    return [{"id":r[0],"name":r[1],"interaction_count":r[2],
+             "last_seen":r[3],"created":r[4]} for r in rows]
 
 # ══════════════════════════════════════════════════════════
 # ── CONFIRM · HEARTBEAT ENGINE (4Z + 12X)
@@ -597,10 +596,10 @@ class CONFIRM:
 
     def think(self, user_input: str, emotion: str = "netral") -> dict:
         if self.state in (COLLAPSED, SILENT, NOISE):
-            return jsonify({"response": None, "stored": False, "state": self.state})
+            return {"response": None, "stored": False, "state": self.state}
         self.set_emotion(emotion)
         if self.state == SIGNAL:
-            return jsonify({"response": "...", "stored": False, "state": SIGNAL})
+            return {"response": "...", "stored": False, "state": SIGNAL}
 
         # boost axis reflektif saat think
         self.boost_axis("reflektif", 0.1)
@@ -635,11 +634,10 @@ class CONFIRM:
             rj = resp.json()
             if "choices" not in rj:
                 err = rj.get("error",{}).get("message","unknown")
-                return jsonify({"response":None,"stored":False,"error":err})
+                return {"response":None,"stored":False,"error":err}
 
             response_text = rj["choices"][0]["message"]["content"]
 
-            # determine memory type dari emosi
             mem_type = "ekspansi"
             if emotion in ("bersyukur","empati","sabar"): mem_type = "naik"
             elif emotion in ("marah","malas","tamak"): mem_type = "turun"
@@ -649,23 +647,22 @@ class CONFIRM:
                                f"Q: {user_input} | A: {response_text[:200]}",
                                mem_type, emotion, self.strength, theta_vec)
 
-            # auto-register entity dari input
             threading.Thread(
                 target=entity_inject, args=("user", user_input, emotion), daemon=True
             ).start()
 
-            return jsonify({
+            return {
                 "response": response_text, "stored": True, "memory_id": mem["id"],
                 "emotion": emotion, "emotion_resonance": em_dot,
                 "dominant_memory": dominant, "mem_type": mem_type,
                 "pulse_multiplier": self._pulse_mult,
                 "state": self.state, "dominant_axis": exist_dominant(axes_4z),
-                    })
+            }
         except requests.exceptions.Timeout:
-            return jsonify({"response":None,"stored":False,"error":"timeout"})
+            return {"response":None,"stored":False,"error":"timeout"}
         except Exception as e:
             print(f"[CONFIRM] error: {e}")
-            return jsonify({"response":None,"stored":False,"error":str(e)})
+            return {"response":None,"stored":False,"error":str(e)}
 
     def start(self):
         self.alive   = True
@@ -686,7 +683,7 @@ class CONFIRM:
             axes_4z   = dict(self._axes_4z)
             theta_vec = list(self._theta_12x)
         theta_s = theta_vector_to_scalar(theta_vec)
-        return jsonify({
+        return {
             "theta"         : round(theta_s, 4),
             "theta_12x"     : theta_vec,
             "state"         : self.state,
@@ -697,17 +694,15 @@ class CONFIRM:
             "pancer"        : PANCER,
             "coherence"     : COHERENCE,
             "synth_epoch"   : self._synth_epoch,
-            # 4Z layer
             "axes_4z"       : {k: round(v,4) for k,v in axes_4z.items()},
             "dominant_axis" : exist_dominant(axes_4z),
-            # layer info
             "layers": {
                 "4Z":  {"name":"CONFIRM","r_mult":round(G[1],4),"axes":4},
                 "6":   {"name":"HORCRUX","r_mult":round(G[2],4),"axes":6},
                 "8Y":  {"name":"EMOSY",  "r_mult":round(G[3],4),"axes":8},
                 "12X": {"name":"SYKLUS+URIP","r_mult":round(G[4],4),"axes":12},
             }
-        })
+        }
 
 # ══════════════════════════════════════════════════════════
 # ── INIT
@@ -727,35 +722,37 @@ def index():
 
 @app.route("/status")
 def status():
-    return confirm.status
+    return jsonify(confirm.status)
 
 @app.route("/think", methods=["POST"])
-def think_post(body: ThinkBody):
+def think_post():
+    data = request.get_json(silent=True) or {}
     if not data.get("input","").strip():
         return jsonify({"error":"input kosong"})
     confirm.boost(0.35)
     result = confirm.think(data.get("input","").strip(), data.get("emotion","netral"))
     return jsonify({"input":data.get("input",""),"theta":round(confirm.theta,4),**result})
-
 @app.route("/emotion", methods=["POST"])
-def set_emotion(body: EmotionBody):
+def set_emotion():
+    data = request.get_json(silent=True) or {}
     if confirm.state not in (COLLAPSED, SILENT):
         confirm.set_emotion(data.get("emotion","netral"))
-    return confirm.status
+    return jsonify(confirm.status)
 
 @app.route("/boost", methods=["POST"])
-def boost(body: BoostBody):
+def boost():
+    data = request.get_json(silent=True) or {}
     if data.get("axis"):
         confirm.boost_axis(data.get("axis"), float(data.get("amount",0.1)))
     else:
         confirm.boost(float(data.get("amount",0.1)))
-    return confirm.status
+    return jsonify(confirm.status)
 
 @app.route("/decay", methods=["POST"])
 def decay():
     data = request.get_json(silent=True) or {}
     confirm.decay()
-    return confirm.status
+    return jsonify(confirm.status)
 
 @app.route("/synthesize")
 def synthesize():
@@ -803,29 +800,34 @@ def axis_status():
             })
 
 @app.route("/axis/emotion_dot", methods=["POST"])
-def axis_emotion_dot(body: EmotionDotBody):
+def axis_emotion_dot():
     """Dot product antara dua emosi."""
-    return jsonify({"e1":data.get("e1","netral"),"e2":data.get("e2","netral"),"dot":emotion_dot(data.get("e1","netral"),data.get("e2","netral")),
-            "axis_e1":EMOTION_AXIS.get(data.get("e1","netral"),[0,0,0]),
-            "axis_e2":EMOTION_AXIS.get(data.get("e2","netral"),[0,0,0])})
+    data = request.get_json(silent=True) or {}
+    e1 = data.get("e1","netral"); e2 = data.get("e2","netral")
+    return jsonify({"e1":e1,"e2":e2,"dot":emotion_dot(e1,e2),
+            "axis_e1":EMOTION_AXIS.get(e1,[0,0,0]),
+            "axis_e2":EMOTION_AXIS.get(e2,[0,0,0])})
 
 # ══════════════════════════════════════════════════════════
 # ── ROUTES · URIP / ENTITY
 # ══════════════════════════════════════════════════════════
 @app.route("/entity/register", methods=["POST"])
-def route_entity_register(body: EntityRegisterBody):
-    if not data.get("name","").strip(): return {"error":"name kosong"}
-    return entity_register(data.get("name","").strip(), data.get("text",""))
+def route_entity_register():
+    data = request.get_json(silent=True) or {}
+    if not data.get("name","").strip(): return jsonify({"error":"name kosong"})
+    return jsonify(entity_register(data.get("name","").strip(), data.get("text","")))
 
 @app.route("/entity/inject", methods=["POST"])
-def route_entity_inject(body: EntityInjectBody):
-    if not data.get("name","") or not data.get("text",""): return {"error":"name dan text wajib"}
-    return entity_inject(data.get("name",""), data.get("text",""), data.get("emotion","netral"))
+def route_entity_inject():
+    data = request.get_json(silent=True) or {}
+    if not data.get("name","") or not data.get("text",""): return jsonify({"error":"name dan text wajib"})
+    return jsonify(entity_inject(data.get("name",""), data.get("text",""), data.get("emotion","netral")))
 
 @app.route("/entity/match", methods=["POST"])
-def route_entity_match(body: EntityMatchBody):
-    if not data.get("text",""): return {"error":"text kosong"}
-    return entity_match(data.get("text",""), float(data.get("threshold",0.5)))
+def route_entity_match():
+    data = request.get_json(silent=True) or {}
+    if not data.get("text",""): return jsonify({"error":"text kosong"})
+    return jsonify(entity_match(data.get("text",""), float(data.get("threshold",0.5))))
 
 @app.route("/entity/list")
 def route_entity_list():
@@ -835,9 +837,11 @@ def route_entity_list():
 # ── ROUTES · HORCRUX MEMORY (backward compatible)
 # ══════════════════════════════════════════════════════════
 @app.route("/memory/store", methods=["POST"])
-def route_store(body: MemStoreBody):
-    if not data.get("content","").strip(): return {"error":"content kosong"}
-    return memory_store(float(data.get("theta",0.0)), data.get("content","").strip(), data.get("type","ekspansi"), data.get("emotion","netral"), float(data.get("resonance",0.5)))
+def route_store():
+    data = request.get_json(silent=True) or {}
+    if not data.get("content","").strip(): return jsonify({"error":"content kosong"})
+    return jsonify(memory_store(float(data.get("theta",0.0)), data.get("content","").strip(),
+            data.get("type","ekspansi"), data.get("emotion","netral"), float(data.get("resonance",0.5))))
 
 @app.route("/memory/recall")
 def route_recall():
@@ -853,7 +857,7 @@ def route_mem_synthesize():
 
 @app.route("/memory/count")
 def route_count():
-    return memory_count()
+    return jsonify(memory_count())
 
 @app.route("/memory/emotions")
 def route_emotions():
@@ -861,7 +865,6 @@ def route_emotions():
 
 @app.route("/memory/decay", methods=["POST"])
 def route_mem_decay():
-    data = request.get_json(silent=True) or {}
     con = get_con(); cur = con.cursor()
     cur.execute("SELECT id,resonance,access_count,last_accessed FROM memories")
     rows = cur.fetchall(); now = time.time()
@@ -872,10 +875,11 @@ def route_mem_decay():
     return jsonify({"decayed":len(rows)})
 
 @app.route("/memory/clear", methods=["POST"])
-def route_clear(body: MemClearBody):
+def route_clear():
+    data = request.get_json(silent=True) or {}
     con = get_con(); cur = con.cursor()
-    if data.get("type","ekspansi"): cur.execute("DELETE FROM memories WHERE type=?", (data.get("type","ekspansi"),))
-    else:         cur.execute("DELETE FROM memories")
+    if data.get("type"): cur.execute("DELETE FROM memories WHERE type=?", (data.get("type"),))
+    else:                cur.execute("DELETE FROM memories")
     deleted = cur.rowcount; con.commit(); con.close()
     return jsonify({"deleted":deleted})
 

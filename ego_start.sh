@@ -23,7 +23,7 @@ echo "   r(θ) = 105 × e^(0.0318 × θ)"
 echo "   PANCER → 4Z → 6 → 8Y → 12X"
 echo ""
 
-python -m gunicorn -w 1 -b 0.0.0.0:5000 ego_backend:app &
+gunicorn -w 1 -b 0.0.0.0:5000 ego_backend:app &
 
 EGO_PID=$!
 sleep 2
