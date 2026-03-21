@@ -8,6 +8,7 @@ fi
 
 echo "◎ EGO · stopping old instance..."
 pkill -f ego_backend.py 2>/dev/null
+pkill -f ego_think.py 2>/dev/null
 pkill -f gunicorn 2>/dev/null
 sleep 1
 
