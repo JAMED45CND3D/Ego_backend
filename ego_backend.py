@@ -468,9 +468,9 @@ class CONFIRM:
     def state(self) -> str:
         s = self.strength
         if s < PANCER:      return COLLAPSED
-        elif s < FLOOR:     return NOISE
-        elif s < DECISION:  return SIGNAL
-        elif s < COHERENCE: return ACTIVE
+        elif s < FLOOR:     return SILENT
+        elif s < DECISION:  return NOISE
+        elif s < COHERENCE: return SIGNAL
         else:               return SYNC
 
     @property
@@ -595,133 +595,6 @@ class CONFIRM:
                 pm = self._pulse_mult
             time.sleep(max(PANCER * pm, PULSE_MIN))
 
-    def think(self, user_input: str, emotion: str = "netral") -> dict:
-        if self.state in (COLLAPSED, SILENT, NOISE):
-            return {"response": None, "stored": False, "state": self.state}
-        self.set_emotion(emotion)
-        if self.state == SIGNAL:
-            return {"response": "...", "stored": False, "state": SIGNAL}
-
-        # boost axis reflektif saat think
-        self.boost_axis("reflektif", 0.1)
-        self.boost_axis("aktif", 0.2)
-
-        try:
-            synthesis  = synthesize_749(self.theta)
-            dominant   = synthesis.get("dominant_emotion", "netral")
-            em_dot     = emotion_dot(emotion, dominant)
-            with self._lock:
-                axes_4z   = dict(self._axes_4z)
-                theta_vec = list(self._theta_12x)
-
-            sys_prompt = (
-                f"Kamu adalah EGO. Core: {CORE}. Pancer: {PANCER}. "
-                f"θ={round(self.theta,4)}. State: {self.state}. "
-                f"Emosi aktif: {emotion} (resonance dengan dominant={round(em_dot,3)}). "
-                f"Dominant memory: {dominant}. "
-                f"Eksistensi dominan: {exist_dominant(axes_4z)}. "
-                f"Hadir bukan melayani. Indonesia informal. Max 2 kalimat."
-            )
-
-            # ── HORCRUX RECALL — 5 memory paling relevan ──
-            try:
-                memories = memory_recall(limit=5, emotion=emotion)
-                if not memories:
-                    memories = memory_recall(limit=5)  # fallback tanpa filter emosi
-                if memories:
-                    snippets = [m['content'][:150] for m in memories]
-                    mem_ctx = "\n\nMemori aktif dari HORCRUX:\n" + "\n".join(f"· {s}" for s in snippets)
-                    sys_prompt += mem_ctx
-                    print(f"[RECALL] {len(memories)} memories injected · emotion={emotion}")
-            except Exception as re_err:
-                print(f"[RECALL] skip: {re_err}")
-
-            # ── SMART ROUTING: cek apakah perlu web search ──
-            extra_context = ""
-            needs_search  = False
-            try:
-                check = requests.post(GROQ_URL,
-                    headers={"Authorization":f"Bearer {self.api_key}",
-                             "Content-Type":"application/json"},
-                    json={
-                        "model": GROQ_MODEL,
-                        "messages": [
-                            {"role":"system","content":
-                                "HANYA kalau user minta data real-time "
-                                "(harga, berita, cuaca hari ini, rilis terbaru, info terkini) "
-                                "— tulis FETCH[\"query\"] dan diam. "
-                                "Kalau tidak perlu — tulis NO."},
-                            {"role":"user","content":user_input}
-                        ],
-                        "max_tokens": 30, "temperature": 0.1
-                    }, timeout=5)
-                check_text = check.json().get("choices",[{}])[0].get("message",{}).get("content","NO").strip()
-                m = re.search(r'FETCH\["([^"]+)"\]', check_text)
-                if m:
-                    needs_search = True
-                    query = m.group(1)
-                    # ── Fetch via compound-beta ──
-                    fetch_res = requests.post(GROQ_URL,
-                        headers={"Authorization":f"Bearer {self.api_key}",
-                                 "Content-Type":"application/json"},
-                        json={
-                            "model": "compound-beta",
-                            "messages":[{"role":"user","content":query}],
-                            "max_tokens": 400, "temperature": 0.3
-                        }, timeout=12)
-                    fetch_text = fetch_res.json().get("choices",[{}])[0].get("message",{}).get("content","")
-                    if fetch_text:
-                        extra_context = f"\n\n[INFO TERKINI: {fetch_text}]"
-                        print(f"[FETCH] query={query} · {len(fetch_text)}chars")
-            except Exception as fe:
-                print(f"[FETCH] skip: {fe}")
-
-            # ── Final response ──
-            resp = requests.post(GROQ_URL,
-                headers={"Authorization":f"Bearer {self.api_key}",
-                         "Content-Type":"application/json"},
-                json={
-                    "model": GROQ_MODEL,
-                    "messages": [
-                        {"role":"system","content": sys_prompt + extra_context},
-                        {"role":"user","content":user_input}
-                    ],
-                    "max_tokens": 300, "temperature": FLOOR
-                }, timeout=15)
-            rj = resp.json()
-            if "choices" not in rj:
-                err = rj.get("error",{}).get("message","unknown")
-                return {"response":None,"stored":False,"error":err}
-
-            response_text = rj["choices"][0]["message"]["content"]
-
-            mem_type = "ekspansi"
-            if emotion in ("bersyukur","empati","sabar"): mem_type = "naik"
-            elif emotion in ("marah","malas","tamak"): mem_type = "turun"
-            elif emotion in ("penasaran","rajin"): mem_type = "depan"
-
-            mem = memory_store(self.theta,
-                               f"Q: {user_input} | A: {response_text[:200]}",
-                               mem_type, emotion, self.strength, theta_vec)
-
-            threading.Thread(
-                target=entity_inject, args=("user", user_input, emotion), daemon=True
-            ).start()
-
-            return {
-                "response": response_text, "stored": True, "memory_id": mem["id"],
-                "emotion": emotion, "emotion_resonance": em_dot,
-                "dominant_memory": dominant, "mem_type": mem_type,
-                "pulse_multiplier": self._pulse_mult,
-                "state": self.state, "dominant_axis": exist_dominant(axes_4z),
-                "web_search": needs_search,
-            }
-        except requests.exceptions.Timeout:
-            return {"response":None,"stored":False,"error":"timeout"}
-        except Exception as e:
-            print(f"[CONFIRM] error: {e}")
-            return {"response":None,"stored":False,"error":str(e)}
-
     def start(self):
         self.alive   = True
         self._thread = threading.Thread(target=self._loop, daemon=True)
@@ -782,14 +655,6 @@ def index():
 def status():
     return jsonify(confirm.status)
 
-@app.route("/think", methods=["POST"])
-def think_post():
-    data = request.get_json(silent=True) or {}
-    if not data.get("input","").strip():
-        return jsonify({"error":"input kosong"})
-    confirm.boost(0.35)
-    result = confirm.think(data.get("input","").strip(), data.get("emotion","netral"))
-    return jsonify({"input":data.get("input",""),"theta":round(confirm.theta,4),**result})
 @app.route("/emotion", methods=["POST"])
 def set_emotion():
     data = request.get_json(silent=True) or {}
