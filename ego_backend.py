@@ -32,7 +32,7 @@ Endpoints baru:
   GET  /entity/list        → list semua entitas
 """
 
-import os, time, threading, requests, sqlite3, math, json
+import os, time, threading, requests, sqlite3, math, json, re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
@@ -622,6 +622,19 @@ class CONFIRM:
                 f"Hadir bukan melayani. Indonesia informal. Max 2 kalimat."
             )
 
+            # ── HORCRUX RECALL — 5 memory paling relevan ──
+            try:
+                memories = memory_recall(limit=5, emotion=emotion)
+                if not memories:
+                    memories = memory_recall(limit=5)  # fallback tanpa filter emosi
+                if memories:
+                    snippets = [m['content'][:150] for m in memories]
+                    mem_ctx = "\n\nMemori aktif dari HORCRUX:\n" + "\n".join(f"· {s}" for s in snippets)
+                    sys_prompt += mem_ctx
+                    print(f"[RECALL] {len(memories)} memories injected · emotion={emotion}")
+            except Exception as re_err:
+                print(f"[RECALL] skip: {re_err}")
+
             # ── SMART ROUTING: cek apakah perlu web search ──
             extra_context = ""
             needs_search  = False
@@ -642,7 +655,6 @@ class CONFIRM:
                         "max_tokens": 30, "temperature": 0.1
                     }, timeout=5)
                 check_text = check.json().get("choices",[{}])[0].get("message",{}).get("content","NO").strip()
-                import re
                 m = re.search(r'FETCH\["([^"]+)"\]', check_text)
                 if m:
                     needs_search = True
