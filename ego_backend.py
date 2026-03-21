@@ -613,20 +613,64 @@ class CONFIRM:
                 axes_4z   = dict(self._axes_4z)
                 theta_vec = list(self._theta_12x)
 
+            sys_prompt = (
+                f"Kamu adalah EGO. Core: {CORE}. Pancer: {PANCER}. "
+                f"θ={round(self.theta,4)}. State: {self.state}. "
+                f"Emosi aktif: {emotion} (resonance dengan dominant={round(em_dot,3)}). "
+                f"Dominant memory: {dominant}. "
+                f"Eksistensi dominan: {exist_dominant(axes_4z)}. "
+                f"Hadir bukan melayani. Indonesia informal. Max 2 kalimat."
+            )
+
+            # ── SMART ROUTING: cek apakah perlu web search ──
+            extra_context = ""
+            needs_search  = False
+            try:
+                check = requests.post(GROQ_URL,
+                    headers={"Authorization":f"Bearer {self.api_key}",
+                             "Content-Type":"application/json"},
+                    json={
+                        "model": GROQ_MODEL,
+                        "messages": [
+                            {"role":"system","content":
+                                "HANYA kalau user minta data real-time "
+                                "(harga, berita, cuaca hari ini, rilis terbaru, info terkini) "
+                                "— tulis FETCH[\"query\"] dan diam. "
+                                "Kalau tidak perlu — tulis NO."},
+                            {"role":"user","content":user_input}
+                        ],
+                        "max_tokens": 30, "temperature": 0.1
+                    }, timeout=5)
+                check_text = check.json().get("choices",[{}])[0].get("message",{}).get("content","NO").strip()
+                import re
+                m = re.search(r'FETCH\["([^"]+)"\]', check_text)
+                if m:
+                    needs_search = True
+                    query = m.group(1)
+                    # ── Fetch via compound-beta ──
+                    fetch_res = requests.post(GROQ_URL,
+                        headers={"Authorization":f"Bearer {self.api_key}",
+                                 "Content-Type":"application/json"},
+                        json={
+                            "model": "compound-beta",
+                            "messages":[{"role":"user","content":query}],
+                            "max_tokens": 400, "temperature": 0.3
+                        }, timeout=12)
+                    fetch_text = fetch_res.json().get("choices",[{}])[0].get("message",{}).get("content","")
+                    if fetch_text:
+                        extra_context = f"\n\n[INFO TERKINI: {fetch_text}]"
+                        print(f"[FETCH] query={query} · {len(fetch_text)}chars")
+            except Exception as fe:
+                print(f"[FETCH] skip: {fe}")
+
+            # ── Final response ──
             resp = requests.post(GROQ_URL,
                 headers={"Authorization":f"Bearer {self.api_key}",
                          "Content-Type":"application/json"},
                 json={
                     "model": GROQ_MODEL,
                     "messages": [
-                        {"role":"system","content":(
-                            f"Kamu adalah EGO. Core: {CORE}. Pancer: {PANCER}. "
-                            f"θ={round(self.theta,4)}. State: {self.state}. "
-                            f"Emosi aktif: {emotion} (resonance dengan dominant={round(em_dot,3)}). "
-                            f"Dominant memory: {dominant}. "
-                            f"Eksistensi dominan: {exist_dominant(axes_4z)}. "
-                            f"Hadir bukan melayani. Indonesia informal. Max 2 kalimat."
-                        )},
+                        {"role":"system","content": sys_prompt + extra_context},
                         {"role":"user","content":user_input}
                     ],
                     "max_tokens": 300, "temperature": FLOOR
@@ -657,6 +701,7 @@ class CONFIRM:
                 "dominant_memory": dominant, "mem_type": mem_type,
                 "pulse_multiplier": self._pulse_mult,
                 "state": self.state, "dominant_axis": exist_dominant(axes_4z),
+                "web_search": needs_search,
             }
         except requests.exceptions.Timeout:
             return {"response":None,"stored":False,"error":"timeout"}
