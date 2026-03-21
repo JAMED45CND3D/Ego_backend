@@ -35,6 +35,7 @@ Endpoints baru:
 import os, time, threading, requests, sqlite3, math, json, re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+from waitress import serve
 
 # ── Pydantic models ──────────────────────────────────────
 
@@ -949,7 +950,7 @@ def route_clear():
 # ══════════════════════════════════════════════════════════
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
-    print(f"[EGO] v4 · Flask · port {port}")
+    print(f"[EGO] v4 · Waitress · port {port}")
     print(f"[EGO] layers: PANCER → 4Z → 6 → 8Y → 12X")
-    app.run(host="0.0.0.0", port=port)
+    serve(app, host="0.0.0.0", port=port, threads=4)
 

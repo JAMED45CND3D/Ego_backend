@@ -31,10 +31,16 @@ echo "   r(θ) = 105 × e^(0.0318 × θ)"
 echo "   PANCER → 4Z → 6 → 8Y → 12X"
 echo ""
 
-gunicorn -w 1 -b 0.0.0.0:5000 ego_backend:app &
+python ego_backend.py &
 
 EGO_PID=$!
-sleep 2
+
+# Wait until port 5000 ready — max 60 detik
+echo "◎ waiting for backend to be ready..."
+for i in $(seq 1 60); do
+  curl -s --max-time 2 http://localhost:5000/ > /dev/null 2>&1 && echo "◎ backend ready · ${i}s" && break
+  sleep 1
+done
 
 echo "◎ feeding nucleus..."
 python feed_nucleus.py 2>/dev/null && echo "   nucleus · OK" || echo "   nucleus · skip"
