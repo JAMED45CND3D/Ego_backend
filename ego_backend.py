@@ -36,7 +36,7 @@ import os, time, threading, requests, sqlite3, math, json, re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from waitress import serve
-from dream.engine import DreamEngine
+from dream_engine import DreamEngine
 
 # ── Pydantic models ──────────────────────────────────────
 
