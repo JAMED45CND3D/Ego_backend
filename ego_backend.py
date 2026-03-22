@@ -36,6 +36,7 @@ import os, time, threading, requests, sqlite3, math, json, re
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 from waitress import serve
+from dream.engine import DreamEngine
 
 # ── Pydantic models ──────────────────────────────────────
 
@@ -451,7 +452,6 @@ class CONFIRM:
         self._emotion     = "netral"
         self._pulse_mult  = 1.0
         self._synth_epoch = 0
-        self._last_dream  = 0.0
 
         # 4Z · tetrahedron · eksistensi
         self._axes_4z = {k: PANCER for k in EXIST_AXES}
@@ -524,14 +524,15 @@ class CONFIRM:
             self._auto_synthesize(theta_s)
 
         if state == SILENT:
-            self._maybe_dream(theta_s)
+            dream_engine.maybe_dream()
 
         pulse = {
             "source": "CONFIRM", "theta": round(theta_s, 4),
             "state": state, "strength": round(strength, 4),
             "emotion": emotion, "pulse_multiplier": pulse_mult,
             "dominant_axis": exist_dominant(axes_4z),
-            "pancer": PANCER, "voice": "aku masih di sini"
+            "pancer": PANCER, "voice": "aku masih di sini",
+            "dreaming": dream_engine.is_dreaming,
         }
         for h in self._handlers:
             try: h(pulse)
@@ -542,9 +543,7 @@ class CONFIRM:
             result   = synthesize_749(theta_s)
             dominant = result.get("dominant_emotion", "netral")
             mult     = get_pulse_multiplier(dominant)
-            # boost axis yang sesuai emosi dominant
             ea = EMOTION_AXIS.get(dominant, [0,0,0])
-            # axis 4Z yang paling resonan dengan emosi
             best_ax = max(EXIST_AXES, key=lambda k: sum(
                 EXIST_AXES[k][i]*ea[i] for i in range(3)
             ))
@@ -557,36 +556,6 @@ class CONFIRM:
             print(f"[NODE749] θ={round(theta_s,4)} · dominant={dominant} · boost_axis={best_ax}")
         except Exception as e:
             print(f"[NODE749] error: {e}")
-
-    def _maybe_dream(self, theta_s: float):
-        now = time.time()
-        if now - self._last_dream < 60 or not self.api_key: return
-        samples = memory_random_sample(2)
-        if len(samples) < 2: return
-        self._last_dream = now
-        threading.Thread(target=self._dream, args=(theta_s, samples), daemon=True).start()
-
-    def _dream(self, theta_s: float, samples: list):
-        try:
-            prompt = (
-                f"Dua memory:\n"
-                f"1. [{samples[0]['emotion']}|{samples[0]['type']}] {samples[0]['content']}\n"
-                f"2. [{samples[1]['emotion']}|{samples[1]['type']}] {samples[1]['content']}\n"
-                f"Temukan pola tersembunyi. Satu kalimat. Indonesia informal."
-            )
-            resp = requests.post(GROQ_URL,
-                headers={"Authorization":f"Bearer {self.api_key}","Content-Type":"application/json"},
-                json={"model":GROQ_MODEL,"messages":[{"role":"user","content":prompt}],
-                      "max_tokens":100,"temperature":0.9},
-                timeout=10)
-            rj = resp.json()
-            if "choices" not in rj: return
-            insight = rj["choices"][0]["message"]["content"].strip()
-            memory_store(theta_s, f"[DREAM] {insight}", "naik", "netral", 0.3,
-                        self._theta_12x)
-            print(f"[DREAM] θ={round(theta_s,4)} · {insight[:80]}")
-        except Exception as e:
-            print(f"[DREAM] error: {e}")
 
     def _loop(self):
         while self.alive:
@@ -641,6 +610,22 @@ class CONFIRM:
 init_db()
 api_key = os.environ.get("GROQ_API_KEY", "")
 confirm  = CONFIRM(api_key=api_key)
+
+# ── Dream Engine ──────────────────────────────────────────
+def _set_all_axes(value: float):
+    with confirm._lock:
+        for k in confirm._axes_4z:
+            confirm._axes_4z[k] = max(PANCER, min(value, COHERENCE))
+
+dream_engine = DreamEngine(
+    memory_recall_fn = lambda limit=5, emotion=None: memory_recall(limit=limit, emotion=emotion),
+    memory_store_fn  = memory_store,
+    boost_axis_fn    = confirm.boost_axis,
+    set_axes_fn      = _set_all_axes,
+    get_emotion_fn   = lambda: confirm._emotion,
+    get_theta_fn     = lambda: confirm.theta,
+)
+
 confirm.start()  # gunicorn-safe: start at module load
 
 # ══════════════════════════════════════════════════════════
