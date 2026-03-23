@@ -180,7 +180,10 @@ def calculate_delta(
     # Source multiplier
     # Direct sedikit lebih kuat — dialami sendiri
     # Vicarious tetap bermakna — tidak lebih rendah, hanya berbeda
-    source_mult = 1.0 if source == "direct" else COHERENCE
+    # Dream = genuine dari dalam, lebih dari vicarious tapi beda dari direct
+    source_mult = 1.0      if source == "direct"    else \
+                  DECISION if source == "dream"     else \
+                  COHERENCE  # vicarious
 
     delta *= source_mult
 

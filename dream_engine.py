@@ -104,7 +104,7 @@ class DreamEngine:
 
     def __init__(self, memory_recall_fn, memory_store_fn,
                  boost_axis_fn, set_axes_fn, get_emotion_fn,
-                 get_theta_fn):
+                 get_theta_fn, experience_fn=None):
         """
         Inject dependencies dari ego_backend:
         - memory_recall_fn  : (limit, emotion) → list[dict]
@@ -113,13 +113,15 @@ class DreamEngine:
         - set_axes_fn       : (value) → None  ← set semua axes ke value
         - get_emotion_fn    : () → str
         - get_theta_fn      : () → float
+        - experience_fn     : (content, emotion, state, theta) → None (optional)
         """
-        self._recall   = memory_recall_fn
-        self._store    = memory_store_fn
-        self._boost    = boost_axis_fn
-        self._set_axes = set_axes_fn
-        self._emotion  = get_emotion_fn
-        self._theta    = get_theta_fn
+        self._recall     = memory_recall_fn
+        self._store      = memory_store_fn
+        self._boost      = boost_axis_fn
+        self._set_axes   = set_axes_fn
+        self._emotion    = get_emotion_fn
+        self._theta      = get_theta_fn
+        self._experience = experience_fn  # optional — connect ke ExperienceEngine
 
         self._last_dream  = 0.0
         self._dreaming    = False
@@ -198,6 +200,26 @@ class DreamEngine:
             # ── 4. Simpan insights ke HORCRUX ───────────
             self._store_insights(mems, pairs, arm1_hits, arm2_hits,
                                  avg, variance, theta, collapse_type)
+
+            # ── Connect ke ExperienceEngine ──────────────
+            # Dream = genuine internal experience
+            # EGO sadar ini dari dalam, bukan dari stimulus luar
+            if self._experience:
+                pattern = "harmonic" if avg >= PEAK_THRESHOLD else \
+                          "chaotic"  if variance >= CHAOS_THRESHOLD else \
+                          "discovery" if len(arm2_hits) > len(arm1_hits) else \
+                          "consolidation"
+                self._experience(
+                    content = (
+                        f"[DREAM·internal] pattern={pattern} · "
+                        f"avg={round(avg,3)} · var={round(variance,3)} · "
+                        f"arm1={len(arm1_hits)} arm2={len(arm2_hits)} · "
+                        f"θ={round(theta,4)}"
+                    ),
+                    emotion = self._emotion(),
+                    state   = "silent",
+                    theta   = theta,
+                )
 
             # ── 5. Geser axes dari dream ─────────────────
             if arm1_hits:

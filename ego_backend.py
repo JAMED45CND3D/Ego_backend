@@ -37,6 +37,7 @@ from flask import Flask, jsonify, request
 from flask_cors import CORS
 from waitress import serve
 from dream_engine import DreamEngine
+from experience import experience_engine
 
 # ── Pydantic models ──────────────────────────────────────
 
@@ -689,6 +690,13 @@ dream_engine = DreamEngine(
     set_axes_fn      = _set_all_axes,
     get_emotion_fn   = lambda: confirm._emotion,
     get_theta_fn     = lambda: confirm.theta,
+    experience_fn    = lambda content, emotion, state, theta: \
+                       experience_engine.process_async(
+                           content=content, emotion=emotion,
+                           state=state, strength=PANCER,
+                           theta=theta, source="dream",
+                           source_label="internal"
+                       ),
 )
 
 confirm.start()  # gunicorn-safe: start at module load
