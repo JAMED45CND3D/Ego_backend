@@ -155,14 +155,28 @@ def calculate_delta(
         delta = PANCER + base * FLOOR    # koneksi positif → Δ lebih besar
 
     # Pattern multiplier
-    pattern_mult = {
-        "harmonic"     : COHERENCE,      # semua selaras → Δ besar
-        "discovery"    : DECISION,       # temukan baru → Δ medium-besar
-        "consolidation": FLOOR,          # perkuat yang ada → Δ medium
-        "chaotic"      : PANCER * 2,     # kontradiksi → Δ kecil tapi ada
-        "neutral"      : PANCER,         # biasa → Δ minimal
-        "none"         : PANCER * 0.5,   # tidak ada koneksi → Δ sangat kecil
-    }.get(pattern, PANCER)
+    var     = urip_result.get("var", 0.0)
+    arm1    = urip_result.get("arm1", 0)
+    arm2    = urip_result.get("arm2", 0)
+
+    if pattern == "chaotic":
+        # Chaos bifurcation point — dua jenis:
+        # Produktif: arm1 + arm2 kuat, var tinggi → konflik memory → insight
+        # Kosong: random noise, tidak ada koneksi → Δ kecil
+        if var > DECISION and arm1 > 0 and arm2 > 0:
+            # Chaos produktif → loncatan potensial
+            pattern_mult = DECISION * (1 + var)
+        else:
+            # Chaos kosong → noise doang
+            pattern_mult = PANCER * 2
+    else:
+        pattern_mult = {
+            "harmonic"     : COHERENCE,  # semua selaras → Δ besar
+            "discovery"    : DECISION,   # eksplorasi aman → Δ stabil
+            "consolidation": FLOOR,      # perkuat yang ada → Δ medium
+            "neutral"      : PANCER,     # biasa → Δ minimal
+            "none"         : PANCER * 0.5,
+        }.get(pattern, PANCER)
 
     delta *= pattern_mult
 
