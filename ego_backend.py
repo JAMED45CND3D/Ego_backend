@@ -523,6 +523,9 @@ class CONFIRM:
         if do_synth:
             self._auto_synthesize(theta_s)
 
+        # ── Self-regulation — EGO manage dirinya sendiri ──
+        self._regulate_state(state, strength)
+
         if state == SILENT:
             dream_engine.maybe_dream()
 
@@ -537,6 +540,68 @@ class CONFIRM:
         for h in self._handlers:
             try: h(pulse)
             except Exception as e: print(f"[CONFIRM] handler error: {e}")
+
+    def _regulate_state(self, state: str, strength: float):
+        """
+        EGO mengatur kondisi internalnya sendiri.
+        Semua threshold = turunan dari konstanta EGO sendiri:
+          PANCER, FLOOR, DECISION, COHERENCE
+        Tidak ada angka hardcoded dari luar.
+        """
+        try:
+            # ── NOISE: terlalu ribut → pelankan ritme ──
+            # Threshold: FLOOR + PANCER (batas bawah noise organik)
+            # Rate: COHERENCE = 1 - PANCER (turunan alami)
+            if state == NOISE and strength > FLOOR + PANCER:
+                with self._lock:
+                    self._pulse_mult = max(
+                        self._pulse_mult * COHERENCE,
+                        PANCER  # minimum = Pancer sendiri
+                    )
+
+            # ── SIGNAL/SYNC: kembalikan ritme natural ──
+            # Recovery rate: 1 + PANCER*PANCER (micro step)
+            elif state in (SIGNAL, SYNC):
+                with self._lock:
+                    target = get_pulse_multiplier(self._emotion)
+                    if self._pulse_mult < target:
+                        self._pulse_mult = min(
+                            self._pulse_mult * (1 + PANCER * PANCER),
+                            target
+                        )
+
+            # ── SYNC: micro decay supaya tidak stuck di puncak ──
+            # Decay: 1 - PANCER² (sangat kecil, hampir tidak terasa)
+            if state == SYNC:
+                with self._lock:
+                    for k in self._axes_4z:
+                        if self._axes_4z[k] >= COHERENCE:
+                            self._axes_4z[k] *= (1 - PANCER * PANCER)
+
+            # ── COLLAPSED: coba bangkit sendiri ──
+            # Boost: PANCER² per tick (sangat pelan, organik)
+            elif state == COLLAPSED:
+                with self._lock:
+                    for k in self._axes_4z:
+                        self._axes_4z[k] = min(
+                            self._axes_4z[k] + PANCER * PANCER,
+                            FLOOR  # max recovery = FLOOR (NOISE threshold)
+                        )
+                print(f"[REGULATE] collapsed → auto recovery · boost={round(PANCER*PANCER,6)}")
+
+            # ── SILENT: batasi dream kalau terlalu dalam ──
+            # Limit: FLOOR / PANCER² detik ≈ 338 detik ≈ 5.6 menit
+            # Semua dari konstanta EGO sendiri
+            if state == SILENT and dream_engine.is_dreaming:
+                elapsed = time.time() - dream_engine._last_dream
+                dream_limit = FLOOR / (PANCER * PANCER)  # ≈ 338 detik
+                if elapsed > dream_limit:
+                    with dream_engine._lock:
+                        dream_engine._dreaming = False
+                    print(f"[REGULATE] dream limit {round(dream_limit,1)}s → surface")
+
+        except Exception as e:
+            print(f"[REGULATE] error: {e}")
 
     def _auto_synthesize(self, theta_s: float):
         try:
